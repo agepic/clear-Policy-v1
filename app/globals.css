@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+:root {
+  /* Soft, comfortable light theme */
+  --background: #f8faf9; /* warm white */
+  --foreground: #0f172a; /* slate-900 */
+  --accent: #16a34a; /* primary green */
+  --accent-2: #0f766e; /* complementary teal */
+  --accent-2-soft: #ccfbf1;
+  --accent-soft: #dcfce7;
+  --border-subtle: #e2e8f0;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+}
