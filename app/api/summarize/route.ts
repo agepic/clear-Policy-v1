@@ -9,6 +9,7 @@ import {
 import { buildCandidatePolicyUrls, guessTermsUrl } from "@/lib/appSearch";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 const MIN_TEXT_LENGTH = 200;
 const FETCH_TIMEOUT_MS = 15000;
 const BROWSERISH_HEADERS = {
@@ -119,7 +120,7 @@ async function handleLink(url: string): Promise<NextResponse> {
   const summary = await summarizePolicyText(fetched.text, {
     sourceDescription: `URL: ${url}`,
   });
-  return NextResponse.json(summary);
+  return NextResponse.json({ ...summary, analyzedChars: fetched.text.length });
 }
 
 async function handleApp(appName: string): Promise<NextResponse> {
@@ -177,7 +178,7 @@ async function handleApp(appName: string): Promise<NextResponse> {
     sourceDescription: `Discovered policy page: ${bestCandidate.url}`,
   });
 
-  return NextResponse.json(summary);
+  return NextResponse.json({ ...summary, analyzedChars: bestCandidate.text.length });
 }
 
 async function handleFileUpload(req: NextRequest): Promise<NextResponse> {
@@ -244,7 +245,7 @@ async function handleFileUpload(req: NextRequest): Promise<NextResponse> {
     sourceDescription: `Uploaded file: ${file.name}`,
   });
 
-  return NextResponse.json(summary);
+  return NextResponse.json({ ...summary, analyzedChars: text.length });
 }
 
 async function fetchAndExtract(url: string): Promise<{ text: string } | null> {

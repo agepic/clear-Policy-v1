@@ -59,7 +59,15 @@ export async function summarizePolicyText(
   }
 
   const json = extractJsonText(payload);
-  const parsed = JSON.parse(json) as Partial<NormalizedSummary>;
+  let parsed: Partial<NormalizedSummary>;
+  try {
+    parsed = JSON.parse(json) as Partial<NormalizedSummary>;
+  } catch {
+    throw new SummarizationProviderError(
+      "Summary could not be parsed. Please try again with a shorter or simpler policy.",
+      502
+    );
+  }
 
   const keyClauses = Array.isArray(parsed.keyClauses)
     ? parsed.keyClauses

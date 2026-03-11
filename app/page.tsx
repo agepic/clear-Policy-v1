@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 type Mode = "app" | "file" | "link";
 
@@ -8,7 +8,11 @@ type SummaryResponse = {
   summaryBullets: string[];
   keyClauses: { label: string; text: string }[];
   warnings: string[];
+  analyzedChars?: number;
 };
+
+const RECENT_KEY = "clearpolicy_recent";
+const RECENT_MAX = 5;
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>("app");
@@ -18,6 +22,21 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SummaryResponse | null>(null);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(RECENT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
+          setRecentSearches(parsed.slice(0, RECENT_MAX));
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   function pickService(name: string) {
     setMode("app");
@@ -75,12 +94,34 @@ export default function Home() {
       }
 
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.error ?? "Something went wrong. Please try again.");
+        let message = "Something went wrong. Please try again.";
+        try {
+          const text = await response.text();
+          const data = text ? (JSON.parse(text) as { error?: string }) : null;
+          if (data?.error) message = data.error;
+          else if (text && response.status >= 500)
+            message = `Server error (${response.status}). Please try again.`;
+        } catch {
+          if (response.status >= 500)
+            message = `Server error (${response.status}). Please try again.`;
+        }
+        throw new Error(message);
       }
 
       const data = (await response.json()) as SummaryResponse;
       setResult(data);
+      const query = mode === "app" ? appName.trim() : mode === "link" ? url : "";
+      if (query) {
+        setRecentSearches((prev) => {
+          const next = [query, ...prev.filter((q) => q !== query)].slice(0, RECENT_MAX);
+          try {
+            localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+          } catch {
+            // ignore
+          }
+          return next;
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unexpected error.");
     } finally {
@@ -91,21 +132,15 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-[radial-gradient(1200px_500px_at_20%_-10%,var(--accent-soft),transparent),radial-gradient(900px_500px_at_100%_0%,var(--accent-2-soft),transparent),var(--background)] text-[var(--foreground)]">
       <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-6 sm:px-8 sm:py-8 lg:px-12">
-        <header className="mb-6 flex items-center justify-between gap-4 sm:mb-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-sm font-semibold text-[var(--accent)] shadow-sm ring-1 ring-[var(--accent)]/15">
-              CP
-            </div>
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight sm:text-xl">
-                Clear Policy
-              </h1>
-              <p className="text-xs text-slate-500 sm:text-sm">
-                Turn dense legal text into clear points.
-              </p>
-            </div>
+        <header className="mb-6 flex flex-wrap items-center justify-between gap-4 sm:mb-8">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+            <img
+              src="/logo.svg"
+              alt="Clear Policy"
+              className="h-11 w-auto sm:h-14"
+            />
           </div>
-          <span className="hidden rounded-full border border-[var(--border-subtle)] bg-white/80 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm backdrop-blur-sm sm:inline-flex">
+          <span className="rounded-full border border-[var(--border-subtle)] bg-white/80 px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm backdrop-blur-sm">
             AI policy assistant
           </span>
         </header>
@@ -196,6 +231,40 @@ export default function Home() {
                   </div>
                 )}
 
+                {recentSearches.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                      Recent
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {recentSearches.map((query) => (
+                        <button
+                          key={query}
+                          type="button"
+                          onClick={() => {
+                            if (/^https?:\/\//i.test(query)) {
+                              setMode("link");
+                              setUrl(query);
+                              setAppName("");
+                              setFile(null);
+                            } else {
+                              setMode("app");
+                              setAppName(query);
+                              setUrl("");
+                              setFile(null);
+                            }
+                            setResult(null);
+                            setError(null);
+                          }}
+                          className="rounded-full border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:border-[var(--accent)]/50 hover:bg-[var(--accent-soft)]/50"
+                        >
+                          {query.length > 32 ? query.slice(0, 32) + "…" : query}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {error && (
                   <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                     {error}
@@ -257,13 +326,17 @@ export default function Home() {
               )}
 
               {isLoading && (
-                <p className="text-sm leading-relaxed text-slate-600">
-                  Reading the policy and preparing a clear summary…
-                </p>
+                <SkeletonLoader />
               )}
 
               {result && (
-                <SummaryResults result={result} />
+                <SummaryResults
+                  result={result}
+                  onRegenerate={() =>
+                    handleSubmit({ preventDefault: () => {} } as React.FormEvent)
+                  }
+                  isRegenerating={isLoading}
+                />
               )}
             </div>
           </aside>
@@ -274,6 +347,36 @@ export default function Home() {
           original policy for legally binding terms.
         </footer>
       </main>
+    </div>
+  );
+}
+
+function SkeletonLoader() {
+  return (
+    <div className="space-y-5 text-sm">
+      <div className="h-8 w-24 animate-pulse rounded-full bg-slate-200" />
+      <section>
+        <div className="mb-2 h-3 w-24 animate-pulse rounded bg-slate-200" />
+        <ul className="space-y-2 pl-4">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <li key={i} className="h-4 animate-pulse rounded bg-slate-100" style={{ width: `${80 - i * 5}%` }} />
+          ))}
+        </ul>
+      </section>
+      <section>
+        <div className="mb-2 h-3 w-28 animate-pulse rounded bg-slate-200" />
+        <div className="space-y-2">
+          <div className="h-16 animate-pulse rounded-xl bg-slate-100" />
+          <div className="h-16 animate-pulse rounded-xl bg-slate-100" />
+        </div>
+      </section>
+      <section>
+        <div className="mb-2 h-3 w-32 animate-pulse rounded bg-slate-200" />
+        <ul className="space-y-2 pl-4">
+          <li className="h-4 w-[85%] animate-pulse rounded bg-slate-100" />
+          <li className="h-4 w-[75%] animate-pulse rounded bg-slate-100" />
+        </ul>
+      </section>
     </div>
   );
 }
@@ -328,62 +431,278 @@ function ModeSelector({ mode, onChange }: ModeSelectorProps) {
   );
 }
 
-function SummaryResults({ result }: { result: SummaryResponse }) {
+function SummaryResults({
+  result,
+  onRegenerate,
+  isRegenerating,
+}: {
+  result: SummaryResponse;
+  onRegenerate: () => void;
+  isRegenerating: boolean;
+}) {
+  type SectionKey = "bullets" | "clauses" | "warnings";
+  const [collapsed, setCollapsed] = useState<Set<SectionKey>>(new Set());
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const toggle = (key: SectionKey) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const copyToClipboard = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(key);
+      window.setTimeout(() => setCopied(null), 2000);
+    } catch {
+      // ignore
+    }
+  };
+
+  const bulletsText = result.summaryBullets.map((b) => `• ${b}`).join("\n");
+  const clausesText = result.keyClauses
+    .map((c) => `${c.label}\n${c.text}`)
+    .join("\n\n");
+  const warningsText = result.warnings.map((w) => `• ${w}`).join("\n");
+  const fullText = [
+    "MAIN POINTS",
+    bulletsText,
+    "",
+    "KEY CLAUSES",
+    clausesText,
+    "",
+    "POTENTIAL RED FLAGS",
+    warningsText,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const downloadTxt = () => {
+    const blob = new Blob([fullText], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "policy-summary.txt";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const riskLevel =
+    result.warnings.length === 0
+      ? "low"
+      : result.warnings.length <= 2
+        ? "medium"
+        : "high";
+  const riskLabel =
+    riskLevel === "low"
+      ? "Low Risk"
+      : riskLevel === "medium"
+        ? "Medium Risk"
+        : "High Risk";
+  const riskClass =
+    riskLevel === "low"
+      ? "bg-emerald-100 text-emerald-800 ring-emerald-200"
+      : riskLevel === "medium"
+        ? "bg-amber-100 text-amber-800 ring-amber-200"
+        : "bg-red-100 text-red-800 ring-red-200";
+
   return (
     <div className="space-y-5 text-sm text-slate-700">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${riskClass}`}
+        >
+          {riskLabel}
+        </span>
+        <button
+          type="button"
+          onClick={onRegenerate}
+          disabled={isRegenerating}
+          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+          aria-label="Regenerate summary"
+        >
+          <RefreshIcon className="h-3.5 w-3.5" />
+          Regenerate
+        </button>
+        <button
+          type="button"
+          onClick={() => copyToClipboard(fullText, "all")}
+          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+        >
+          {copied === "all" ? "Copied!" : "Copy all"}
+        </button>
+        <button
+          type="button"
+          onClick={downloadTxt}
+          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+        >
+          Download summary
+        </button>
+      </div>
+
       {result.summaryBullets.length > 0 && (
         <section>
-          <h4 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-            Main points
-          </h4>
-      <ul className="list-disc space-y-1 pl-4 marker:text-[var(--accent)]">
-            {result.summaryBullets.map((item, idx) => (
-              <li key={idx} className="leading-relaxed">
-                {item}
-              </li>
-            ))}
-          </ul>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => toggle("bullets")}
+              className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 hover:text-slate-700"
+            >
+              <ChevronIcon
+                className={`h-4 w-4 transition ${collapsed.has("bullets") ? "" : "-rotate-90"}`}
+              />
+              Main points
+            </button>
+            <button
+              type="button"
+              onClick={() => copyToClipboard(bulletsText, "bullets")}
+              className="text-xs font-medium text-slate-500 hover:text-slate-700"
+            >
+              {copied === "bullets" ? "Copied!" : "Copy"}
+            </button>
+          </div>
+          <div
+            className={`overflow-hidden transition-[height] duration-200 ${
+              collapsed.has("bullets") ? "max-h-0 opacity-0" : "max-h-[2000px] opacity-100"
+            }`}
+          >
+            <ul className="list-disc space-y-1 pl-4 marker:text-[var(--accent)]">
+              {result.summaryBullets.map((item, idx) => (
+                <li key={idx} className="leading-relaxed">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
         </section>
       )}
 
       {result.keyClauses.length > 0 && (
         <section>
-          <h4 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent-2)]">
-            Key clauses
-          </h4>
-          <div className="space-y-2">
-            {result.keyClauses.map((clause, idx) => (
-              <div
-                key={idx}
-                className="rounded-xl border border-[var(--border-subtle)] bg-slate-50/80 p-3"
-              >
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--accent-2)]">
-                  {clause.label}
-                </p>
-                <p className="mt-1 text-sm leading-relaxed text-slate-700">
-                  {clause.text}
-                </p>
-              </div>
-            ))}
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => toggle("clauses")}
+              className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent-2)] hover:opacity-90"
+            >
+              <ChevronIcon
+                className={`h-4 w-4 transition ${collapsed.has("clauses") ? "" : "-rotate-90"}`}
+              />
+              Key clauses
+            </button>
+            <button
+              type="button"
+              onClick={() => copyToClipboard(clausesText, "clauses")}
+              className="text-xs font-medium text-slate-500 hover:text-slate-700"
+            >
+              {copied === "clauses" ? "Copied!" : "Copy"}
+            </button>
+          </div>
+          <div
+            className={`overflow-hidden transition-[height] duration-200 ${
+              collapsed.has("clauses") ? "max-h-0 opacity-0" : "max-h-[3000px] opacity-100"
+            }`}
+          >
+            <div className="space-y-2">
+              {result.keyClauses.map((clause, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-xl border border-[var(--border-subtle)] bg-slate-50/80 p-3"
+                >
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--accent-2)]">
+                    {clause.label}
+                  </p>
+                  <p className="mt-1 text-sm leading-relaxed text-slate-700">
+                    {clause.text}
+                  </p>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
       )}
 
       {result.warnings.length > 0 && (
         <section>
-          <h4 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-red-600">
-            Potential red flags
-          </h4>
-          <ul className="list-disc space-y-1 pl-4 text-red-700">
-            {result.warnings.map((item, idx) => (
-              <li key={idx} className="leading-relaxed">
-                {item}
-              </li>
-            ))}
-          </ul>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => toggle("warnings")}
+              className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-red-600 hover:opacity-90"
+            >
+              <ChevronIcon
+                className={`h-4 w-4 transition ${collapsed.has("warnings") ? "" : "-rotate-90"}`}
+              />
+              Potential red flags
+            </button>
+            <button
+              type="button"
+              onClick={() => copyToClipboard(warningsText, "warnings")}
+              className="text-xs font-medium text-slate-500 hover:text-slate-700"
+            >
+              {copied === "warnings" ? "Copied!" : "Copy"}
+            </button>
+          </div>
+          <div
+            className={`overflow-hidden transition-[height] duration-200 ${
+              collapsed.has("warnings") ? "max-h-0 opacity-0" : "max-h-[1000px] opacity-100"
+            }`}
+          >
+            <ul className="list-disc space-y-1 pl-4 text-red-700">
+              {result.warnings.map((item, idx) => (
+                <li key={idx} className="leading-relaxed">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
         </section>
       )}
+
+      {typeof result.analyzedChars === "number" && (
+        <p className="text-xs text-slate-500">
+          Analyzed {result.analyzedChars.toLocaleString()} characters
+        </p>
+      )}
     </div>
+  );
+}
+
+function ChevronIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden
+    >
+      <path d="M9 18l6-6-6-6" />
+    </svg>
+  );
+}
+
+function RefreshIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+      <path d="M16 21h5v-5" />
+    </svg>
   );
 }
 
